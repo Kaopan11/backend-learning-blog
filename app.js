@@ -14,6 +14,12 @@ const data = {
 };
 
 // 2. สร้าง API Endpoints
+
+// Test Status Server
+app.get('/', (req, res) => {
+  return res.send('🚀 Backend API Server is running successfully!');
+});
+
 // GET /profiles
 app.get("/profiles", (req, res) => {
   res.status(200).json({ data });
