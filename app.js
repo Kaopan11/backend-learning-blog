@@ -110,6 +110,7 @@ app.get("/posts", async (req, res) => {
       nextPage,
     });
   } catch (error) {
+    console.error("GET /posts error:", error.message);
     return res.status(500).json({
       message: "Server could not read post because database connection",
     });
