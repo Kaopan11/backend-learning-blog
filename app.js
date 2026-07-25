@@ -7,7 +7,15 @@ import pool from "./utils/db.js";
 const app = express();
 const port = process.env.PORT || 4000;
 
-app.use(cors());
+app.use(
+  cors({
+    origin: [
+      "http://localhost:5173",
+      "http://localhost:3000",
+      "https://kaopan-learning-blog.vercel.app",
+    ],
+  })
+);
 app.use(express.json());
 
 // 1. Database Mockup
@@ -21,6 +29,11 @@ const data = {
 // Test Status Server
 app.get('/', (req, res) => {
   return res.send('🚀 Backend API Server is running successfully!');
+});
+
+// GET /health
+app.get("/health", (req, res) => {
+  res.status(200).json({ message: "OK" });
 });
 
 // GET /profiles
