@@ -2,6 +2,7 @@ import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import pool from "./utils/db.js";
+import { validatePostInput } from "./middlewares/postValidation.js";
 
 
 const app = express();
@@ -155,7 +156,7 @@ app.get("/posts/:postId", async (req, res) => {
 });
 
 // PUT /posts/:postId
-app.put("/posts/:postId", async (req, res) => {
+app.put("/posts/:postId", validatePostInput, async (req, res) => {
   const { postId } = req.params;
   const { title, image, category_id, description, content, status_id } =
     req.body;
@@ -215,23 +216,9 @@ app.delete("/posts/:postId", async (req, res) => {
 });
 
 // POST /assignments — สร้างบทความใหม่ในตาราง posts
-app.post("/assignments", async (req, res) => {
+app.post("/assignments", validatePostInput, async (req, res) => {
   const { title, image, category_id, description, content, status_id } =
     req.body;
-
-  if (
-    !title ||
-    !image ||
-    !category_id ||
-    !description ||
-    !content ||
-    !status_id
-  ) {
-    return res.status(400).json({
-      message:
-        "Server could not create post because there are missing data from client",
-    });
-  }
 
   try {
     await pool.query(
