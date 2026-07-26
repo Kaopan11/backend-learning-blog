@@ -1,13 +1,14 @@
+// โหลดค่าจาก .env ก่อนเริ่มแอป
 import "dotenv/config";
 import express from "express";
 import cors from "cors";
-import pool from "./utils/db.js";
+import postRouter, { createPost } from "./routes/posts.js";
 import { validatePostInput } from "./middlewares/postValidation.js";
-
 
 const app = express();
 const port = process.env.PORT || 4000;
 
+// อนุญาตให้ Frontend จาก origin ที่กำหนดเรียก API ได้
 app.use(
   cors({
     origin: [
@@ -17,225 +18,37 @@ app.use(
     ],
   })
 );
+// แปลง JSON body จาก request ให้ใช้เป็น req.body ได้
 app.use(express.json());
 
-// 1. Database Mockup
+// ข้อมูลจำลองสำหรับ GET /profiles
 const data = {
   name: "john",
   age: 20,
 };
 
-// 2. สร้าง API Endpoints
-
-// Test Status Server
-app.get('/', (req, res) => {
-  return res.send('🚀 Backend API Server is running successfully!');
+// เช็คว่า server รันอยู่ (หน้าแรก)
+app.get("/", (req, res) => {
+  return res.send("🚀 Backend API Server is running successfully!");
 });
 
-// GET /health
+// Health check สำหรับ Frontend / monitoring
 app.get("/health", (req, res) => {
   res.status(200).json({ message: "OK" });
 });
 
-// GET /profiles
+// โปรไฟล์ตัวอย่าง (mock)
 app.get("/profiles", (req, res) => {
   res.status(200).json({ data });
 });
 
-// GET /posts
-app.get("/posts", async (req, res) => {
-  const page = Number(req.query.page) || 1;
-  const limit = Number(req.query.limit) || 6;
-  const category = req.query.category;
-  const keyword = req.query.keyword;
-  const offset = (page - 1) * limit;
+// เชื่อม routes ของโพสต์ทั้งหมดไว้ที่ /posts
+// เช่น GET /posts, GET /posts/:postId, POST /posts, PUT/DELETE /posts/:postId
+app.use("/posts", postRouter);
 
-  try {
-    const values = [];
-    const where = [];
-
-    if (category) {
-      values.push(category);
-      where.push(`categories.name ILIKE $${values.length}`);
-    }
-
-    if (keyword) {
-      values.push(`%${keyword}%`);
-      const i = values.length;
-      where.push(
-        `(posts.title ILIKE $${i} OR posts.description ILIKE $${i} OR posts.content ILIKE $${i})`
-      );
-    }
-
-    const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
-
-    const countResult = await pool.query(
-      `SELECT COUNT(*)::int AS total
-       FROM posts
-       LEFT JOIN categories ON posts.category_id = categories.id
-       ${whereSql}`,
-      values
-    );
-
-    const totalPosts = countResult.rows[0].total;
-    const totalPages = Math.ceil(totalPosts / limit) || 0;
-    const nextPage = page < totalPages ? page + 1 : null;
-
-    const listValues = [...values, limit, offset];
-    const result = await pool.query(
-      `SELECT
-         posts.id,
-         posts.image,
-         categories.name AS category,
-         posts.title,
-         posts.description,
-         posts.date,
-         posts.content,
-         statuses.status AS status,
-         posts.likes_count
-       FROM posts
-       LEFT JOIN categories ON posts.category_id = categories.id
-       LEFT JOIN statuses ON posts.status_id = statuses.id
-       ${whereSql}
-       ORDER BY posts.id ASC
-       LIMIT $${values.length + 1} OFFSET $${values.length + 2}`,
-      listValues
-    );
-
-    return res.status(200).json({
-      totalPosts,
-      totalPages,
-      currentPage: page,
-      limit,
-      posts: result.rows,
-      nextPage,
-    });
-  } catch (error) {
-    console.error("GET /posts error:", error.message);
-    return res.status(500).json({
-      message: "Server could not read post because database connection",
-    });
-  }
-});
-
-// GET /posts/:postId
-app.get("/posts/:postId", async (req, res) => {
-  const { postId } = req.params;
-
-  try {
-    const result = await pool.query(
-      `SELECT
-         posts.id,
-         posts.image,
-         categories.name AS category,
-         posts.title,
-         posts.description,
-         posts.date,
-         posts.content,
-         statuses.status AS status,
-         posts.likes_count
-       FROM posts
-       LEFT JOIN categories ON posts.category_id = categories.id
-       LEFT JOIN statuses ON posts.status_id = statuses.id
-       WHERE posts.id = $1`,
-      [postId]
-    );
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({
-        message: "Server could not find a requested post",
-      });
-    }
-
-    return res.status(200).json(result.rows[0]);
-  } catch (error) {
-    return res.status(500).json({
-      message: "Server could not read post because database connection",
-    });
-  }
-});
-
-// PUT /posts/:postId
-app.put("/posts/:postId", validatePostInput, async (req, res) => {
-  const { postId } = req.params;
-  const { title, image, category_id, description, content, status_id } =
-    req.body;
-
-  try {
-    const result = await pool.query(
-      `UPDATE posts
-       SET title = $2,
-           image = $3,
-           category_id = $4,
-           description = $5,
-           content = $6,
-           status_id = $7
-       WHERE id = $1`,
-      [postId, title, image, category_id, description, content, status_id]
-    );
-
-    if (result.rowCount === 0) {
-      return res.status(404).json({
-        message: "Server could not find a requested post to update",
-      });
-    }
-
-    return res.status(200).json({
-      message: "Updated post sucessfully",
-    });
-  } catch (error) {
-    return res.status(500).json({
-      message: "Server could not update post because database connection",
-    });
-  }
-});
-
-// DELETE /posts/:postId
-app.delete("/posts/:postId", async (req, res) => {
-  const { postId } = req.params;
-
-  try {
-    const result = await pool.query(`DELETE FROM posts WHERE id = $1`, [
-      postId,
-    ]);
-
-    if (result.rowCount === 0) {
-      return res.status(404).json({
-        message: "Server could not find a requested post to delete",
-      });
-    }
-
-    return res.status(200).json({
-      message: "Deleted post sucessfully",
-    });
-  } catch (error) {
-    return res.status(500).json({
-      message: "Server could not delete post because database connection",
-    });
-  }
-});
-
-// POST /assignments — สร้างบทความใหม่ในตาราง posts
-app.post("/assignments", validatePostInput, async (req, res) => {
-  const { title, image, category_id, description, content, status_id } =
-    req.body;
-
-  try {
-    await pool.query(
-      `INSERT INTO posts (title, image, category_id, description, content, status_id)
-       VALUES ($1, $2, $3, $4, $5, $6)`,
-      [title, image, category_id, description, content, status_id]
-    );
-
-    return res.status(201).json({
-      message: "Created post sucessfully",
-    });
-  } catch (error) {
-    return res.status(500).json({
-      message: "Server could not create post because database connection",
-    });
-  }
-});
+// สร้างโพสต์แบบเดิมตามโจทย์ API Doc (ชื่อ path เป็น /assignments)
+// ทำงานเหมือน POST /posts — ตรวจ body แล้ว INSERT ลงตาราง posts
+app.post("/assignments", validatePostInput, createPost);
 
 app.listen(port, () => {
   console.log(`Server is running at ${port}`);
