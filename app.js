@@ -3,6 +3,7 @@ import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import postRouter, { createPost } from "./routes/posts.js";
+import authRouter from "./routes/auth.js";
 import { validatePostInput } from "./middlewares/postValidation.js";
 
 const app = express();
@@ -45,6 +46,9 @@ app.get("/profiles", (req, res) => {
 // เชื่อม routes ของโพสต์ทั้งหมดไว้ที่ /posts
 // เช่น GET /posts, GET /posts/:postId, POST /posts, PUT/DELETE /posts/:postId
 app.use("/posts", postRouter);
+
+// Auth routes — register / login
+app.use("/auth", authRouter);
 
 // สร้างโพสต์แบบเดิมตามโจทย์ API Doc (ชื่อ path เป็น /assignments)
 // ทำงานเหมือน POST /posts — ตรวจ body แล้ว INSERT ลงตาราง posts
