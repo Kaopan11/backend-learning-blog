@@ -1,5 +1,8 @@
 import express from "express";
 import pool from "../utils/db.js";
+import supabase from "../utils/supabase.js";
+import { multerUpload } from "../utils/upload.js";
+import { protectAdmin } from "../middlewares/protectAdmin.js";
 import { validatePostInput } from "../middlewares/postValidation.js";
 
 const postRouter = express.Router();
@@ -102,8 +105,66 @@ postRouter.get("/", async (req, res) => {
   }
 });
 
-// POST /posts
-postRouter.post("/", validatePostInput, createPost);
+// POST /posts — admin only, multipart upload to Supabase Storage
+postRouter.post(
+  "/",
+  protectAdmin,
+  multerUpload.fields([{ name: "imageFile", maxCount: 1 }]),
+  async (req, res) => {
+    const { title, category_id, description, content, status_id } = req.body;
+    const file = req.files?.imageFile?.[0];
+
+    if (!file) {
+      return res.status(400).json({ error: "Image file is required" });
+    }
+
+    const bucketName =
+      process.env.SUPABASE_STORAGE_BUCKET || "my-learning-blog";
+    const safeName = file.originalname.replace(/\s+/g, "_");
+    const filePath = `posts/${Date.now()}_${safeName}`;
+
+    try {
+      const { error: uploadError } = await supabase.storage
+        .from(bucketName)
+        .upload(filePath, file.buffer, {
+          contentType: file.mimetype,
+        });
+
+      if (uploadError) {
+        console.error("Supabase storage upload error:", uploadError.message);
+        return res.status(500).json({ error: "Failed to upload image" });
+      }
+
+      const { data: publicUrlData } = supabase.storage
+        .from(bucketName)
+        .getPublicUrl(filePath);
+
+      const publicUrl = publicUrlData.publicUrl;
+
+      await pool.query(
+        `INSERT INTO posts (title, image, category_id, description, content, status_id)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [
+          title,
+          publicUrl,
+          Number(category_id),
+          description,
+          content,
+          Number(status_id),
+        ]
+      );
+
+      return res.status(201).json({
+        message: "Created post successfully",
+      });
+    } catch (error) {
+      console.error("POST /posts error:", error.message);
+      return res.status(500).json({
+        message: "Server could not create post because database connection",
+      });
+    }
+  }
+);
 
 // GET /posts/:postId
 postRouter.get("/:postId", async (req, res) => {
