@@ -120,8 +120,20 @@ postRouter.post(
 
     const bucketName =
       process.env.SUPABASE_STORAGE_BUCKET?.trim() || "my-learning-blog";
-    const safeName = file.originalname.replace(/\s+/g, "_");
-    const filePath = `posts/${Date.now()}_${safeName}`;
+
+    const rawExt = file.originalname.includes(".")
+      ? file.originalname.split(".").pop().toLowerCase()
+      : "jpg";
+    const ext = rawExt.replace(/[^a-z0-9]/g, "") || "jpg";
+    const rawBase = file.originalname.includes(".")
+      ? file.originalname.slice(0, file.originalname.lastIndexOf("."))
+      : file.originalname;
+    const base =
+      rawBase
+        .replace(/\s+/g, "_")
+        .replace(/[^a-zA-Z0-9_-]/g, "")
+        .slice(0, 80) || "image";
+    const filePath = `posts/${Date.now()}_${base}.${ext}`;
     const accessToken = req.headers.authorization?.split(" ")[1];
     const supabaseClient = createSupabaseClient(accessToken);
 
