@@ -1,6 +1,6 @@
 import express from "express";
 import pool from "../utils/db.js";
-import supabase from "../utils/supabase.js";
+import { createSupabaseClient } from "../utils/supabase.js";
 import { multerUpload } from "../utils/upload.js";
 import { protectAdmin } from "../middlewares/protectAdmin.js";
 import { validatePostInput } from "../middlewares/postValidation.js";
@@ -119,31 +119,38 @@ postRouter.post(
     }
 
     const bucketName =
-      process.env.SUPABASE_STORAGE_BUCKET || "my-learning-blog";
+      process.env.SUPABASE_STORAGE_BUCKET?.trim() || "my-learning-blog";
     const safeName = file.originalname.replace(/\s+/g, "_");
     const filePath = `posts/${Date.now()}_${safeName}`;
+    const accessToken = req.headers.authorization?.split(" ")[1];
+    const supabaseClient = createSupabaseClient(accessToken);
 
     try {
-      const { error: uploadError } = await supabase.storage
+      const { error: uploadError } = await supabaseClient.storage
         .from(bucketName)
         .upload(filePath, file.buffer, {
           contentType: file.mimetype,
+          upsert: false,
         });
 
       if (uploadError) {
-        console.error("Supabase storage upload error:", uploadError.message);
-        return res.status(500).json({ error: "Failed to upload image" });
+        console.error("Supabase storage upload error:", uploadError);
+        return res.status(500).json({
+          error: "Failed to upload image",
+          details: uploadError.message,
+        });
       }
 
-      const { data: publicUrlData } = supabase.storage
+      const { data: publicUrlData } = supabaseClient.storage
         .from(bucketName)
         .getPublicUrl(filePath);
 
       const publicUrl = publicUrlData.publicUrl;
 
-      await pool.query(
+      const result = await pool.query(
         `INSERT INTO posts (title, image, category_id, description, content, status_id)
-         VALUES ($1, $2, $3, $4, $5, $6)`,
+         VALUES ($1, $2, $3, $4, $5, $6)
+         RETURNING id, title, image, category_id, description, content, status_id`,
         [
           title,
           publicUrl,
@@ -156,6 +163,7 @@ postRouter.post(
 
       return res.status(201).json({
         message: "Created post successfully",
+        post: result.rows[0],
       });
     } catch (error) {
       console.error("POST /posts error:", error.message);
