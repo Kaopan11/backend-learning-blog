@@ -1,6 +1,8 @@
 import express from "express";
 import connectionPool from "../utils/db.js";
-import supabase from "../utils/supabase.js";
+import supabase, { createSupabaseClient } from "../utils/supabase.js";
+import { multerUpload } from "../utils/upload.js";
+import { protectUser } from "../middlewares/protectUser.js";
 
 const authRouter = express.Router();
 
@@ -170,5 +172,111 @@ authRouter.put("/reset-password", async (req, res) => {
     return res.status(500).json({ error: "Failed to update password" });
   }
 });
+
+// PUT /auth/profile
+authRouter.put(
+  "/profile",
+  protectUser,
+  multerUpload.fields([{ name: "imageFile", maxCount: 1 }]),
+  async (req, res) => {
+    const userId = req.user.id;
+    const { name, username } = req.body;
+    const file = req.files?.imageFile?.[0];
+    const accessToken = req.headers.authorization?.split(" ")[1];
+
+    const updates = [];
+    const values = [];
+    let paramIndex = 1;
+
+    try {
+      if (name !== undefined && name !== null && name !== "") {
+        updates.push(`name = $${paramIndex++}`);
+        values.push(name);
+      }
+
+      if (username !== undefined && username !== null && username !== "") {
+        const existingUser = await connectionPool.query(
+          "SELECT id FROM users WHERE username = $1 AND id != $2",
+          [username, userId]
+        );
+
+        if (existingUser.rows.length > 0) {
+          return res.status(400).json({ error: "This username is already taken" });
+        }
+
+        updates.push(`username = $${paramIndex++}`);
+        values.push(username);
+      }
+
+      if (file) {
+        const bucketName =
+          process.env.SUPABASE_STORAGE_BUCKET?.trim() || "my-learning-blog";
+
+        const rawExt = file.originalname.includes(".")
+          ? file.originalname.split(".").pop().toLowerCase()
+          : "jpg";
+        const ext = rawExt.replace(/[^a-z0-9]/g, "") || "jpg";
+        const filePath = `profiles/${userId}-${Date.now()}.${ext}`;
+
+        const supabaseClient = createSupabaseClient(accessToken);
+
+        const { error: uploadError } = await supabaseClient.storage
+          .from(bucketName)
+          .upload(filePath, file.buffer, {
+            contentType: file.mimetype,
+            upsert: false,
+          });
+
+        if (uploadError) {
+          console.error("PUT /auth/profile upload error:", uploadError);
+          return res.status(500).json({
+            error: "Failed to upload profile image",
+            details: uploadError.message,
+          });
+        }
+
+        const { data: publicUrlData } = supabaseClient.storage
+          .from(bucketName)
+          .getPublicUrl(filePath);
+
+        updates.push(`profile_pic = $${paramIndex++}`);
+        values.push(publicUrlData.publicUrl);
+      }
+
+      if (updates.length === 0) {
+        return res.status(400).json({ error: "No fields provided to update" });
+      }
+
+      values.push(userId);
+
+      const result = await connectionPool.query(
+        `UPDATE users SET ${updates.join(", ")}
+         WHERE id = $${paramIndex}
+         RETURNING id, username, name, role, profile_pic`,
+        values
+      );
+
+      if (result.rows.length === 0) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      const user = result.rows[0];
+
+      return res.status(200).json({
+        message: "Profile updated successfully",
+        user: {
+          id: user.id,
+          username: user.username,
+          name: user.name,
+          role: user.role,
+          profilePic: user.profile_pic,
+        },
+      });
+    } catch (error) {
+      console.error("PUT /auth/profile error:", error.message);
+      return res.status(500).json({ error: "Failed to update profile" });
+    }
+  }
+);
 
 export default authRouter;
